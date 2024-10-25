@@ -136,6 +136,10 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         src_offset += len;
         buffer_offset += len;
 
+        if buffer_offset == buffer.len() && src_offset == src.len() {
+            break;
+        }
+
         // end of buffer, switch to the next page
         if buffer_offset == buffer.len() {
             buffer_offset = 0;
