@@ -116,6 +116,8 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     let syscall_times = cur_task.syscall_times;
     let time = get_time_us() - cur_task.task_start_time;
 
+    drop(inner);
+
     let token = current_user_token();
     let mut buffers = translated_byte_buffer(token, _ti as *const u8, core::mem::size_of::<TaskInfo>());
 
