@@ -1,10 +1,10 @@
 //! Process management syscalls
 use crate::{
-    config::MAX_SYSCALL_NUM,
-    task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
-    },
+    config::{CLOCK_FREQ, MAX_SYSCALL_NUM}, mm::translated_byte_buffer, task::{
+        change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, TASK_MANAGER
+    }, timer::{get_time, get_time_us}
 };
+use core::slice;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -43,7 +43,58 @@ pub fn sys_yield() -> isize {
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    if _ts.is_null() {
+        return -1;
+    }
+
+    // get current tick
+    let time_ticks = get_time();
+    let sec = time_ticks / CLOCK_FREQ;
+    let usec = (time_ticks % CLOCK_FREQ) * 1_000_000 / CLOCK_FREQ;
+
+    // convert the virtual address
+    let token = current_user_token();
+    let mut buffers = translated_byte_buffer(token, _ts as *const u8, core::mem::size_of::<TimeVal>());
+
+    let mut buffer_offset = 0;
+    let mut src_offset = 0;
+    let mut src = unsafe {
+        slice::from_raw_parts(
+            &sec as *const _ as *const u8,
+            core::mem::size_of::<usize>()
+        )
+    };
+
+    let mut buffer_iter = buffers.iter_mut ();
+    let mut buffer = buffer_iter.next().unwrap();
+
+    while src_offset < src.len() {
+        let len = (src.len() - src_offset).min(buffer.len() - buffer_offset);
+        buffer[buffer_offset..buffer_offset + len].copy_from_slice(&src[src_offset..src_offset + len]);
+        src_offset += len;
+        buffer_offset += len;
+
+        if buffer_offset == buffer.len() && src_offset == src.len() {
+            break;
+        }
+
+        if buffer_offset == buffer.len() {
+            buffer_offset = 0;
+            buffer = buffer_iter.next().unwrap();
+        }
+
+        if src_offset == src.len() {
+            src = unsafe {
+                slice::from_raw_parts(
+                    &usec as *const _ as *const u8,
+                    core::mem::size_of::<usize>()
+                )
+            };
+            src_offset = 0;
+        }
+    }
+
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -51,7 +102,61 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
-    -1
+    
+    if _ti.is_null() {
+        return -1;
+    }
+
+    // get current task
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_task_num = inner.current_task;
+    let cur_task = &mut inner.tasks[cur_task_num];
+
+    let status = cur_task.task_status;
+    let syscall_times = cur_task.syscall_times;
+    let time = get_time_us() - cur_task.task_start_time;
+
+    let token = current_user_token();
+    let mut buffers = translated_byte_buffer(token, _ti as *const u8, core::mem::size_of::<TaskInfo>());
+
+    let mut buffer_iter = buffers.iter_mut();
+    let mut buffer = buffer_iter.next().unwrap();
+    let mut buffer_offset = 0;
+    let mut src_offset = 0;
+    let mut src = unsafe {
+        slice::from_raw_parts(&status as *const _ as *const u8,
+        core::mem::size_of::<TaskStatus>())
+    };
+
+    while src_offset < src.len() {
+        let len = (src.len() - src_offset).min(buffer.len() - buffer_offset);
+        buffer[buffer_offset..buffer_offset + len].copy_from_slice(&src[src_offset..src_offset + len]);
+        src_offset += len;
+        buffer_offset += len;
+
+        // end of buffer, switch to the next page
+        if buffer_offset == buffer.len() {
+            buffer_offset = 0;
+            buffer = buffer_iter.next().unwrap();
+        }
+
+        if src_offset == src.len() {
+            if src.len() == core::mem::size_of::<TaskStatus>() {
+                src = unsafe {
+                    slice::from_raw_parts(&syscall_times as *const _ as *const u8,
+                    core::mem::size_of::<[u32; MAX_SYSCALL_NUM]>())
+                };
+            } else if src.len() == core::mem::size_of::<[u32; MAX_SYSCALL_NUM]>() {
+                src = unsafe {
+                    slice::from_raw_parts(&time as *const _ as *const u8,
+                    core::mem::size_of::<usize>())
+                };
+            }
+            src_offset = 0;
+        }
+    }
+
+    0
 }
 
 // YOUR JOB: Implement mmap.
