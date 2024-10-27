@@ -1,8 +1,9 @@
 //! Process management syscalls
+#[allow(unused)]
 use crate::{
     config::{CLOCK_FREQ, MAX_SYSCALL_NUM}, mm::translated_byte_buffer, task::{
         change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, TASK_MANAGER
-    }, timer::{get_time, get_time_us}
+    }, timer::{get_time, get_time_ms}
 };
 use core::slice;
 
@@ -51,6 +52,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     let time_ticks = get_time();
     let sec = time_ticks / CLOCK_FREQ;
     let usec = (time_ticks % CLOCK_FREQ) * 1_000_000 / CLOCK_FREQ;
+    let time = TimeVal { sec, usec };
 
     // convert the virtual address
     let token = current_user_token();
@@ -58,10 +60,10 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 
     let mut buffer_offset = 0;
     let mut src_offset = 0;
-    let mut src = unsafe {
+    let src = unsafe {
         slice::from_raw_parts(
-            &sec as *const _ as *const u8,
-            core::mem::size_of::<usize>()
+            &time as *const _ as *const u8,
+            core::mem::size_of::<TimeVal>()
         )
     };
 
@@ -74,23 +76,12 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         src_offset += len;
         buffer_offset += len;
 
-        if buffer_offset == buffer.len() && src_offset == src.len() {
-            break;
-        }
-
         if buffer_offset == buffer.len() {
             buffer_offset = 0;
-            buffer = buffer_iter.next().unwrap();
-        }
-
-        if src_offset == src.len() {
-            src = unsafe {
-                slice::from_raw_parts(
-                    &usec as *const _ as *const u8,
-                    core::mem::size_of::<usize>()
-                )
+            buffer = match buffer_iter.next() {
+                Some(buf) => buf,
+                None => return 0,
             };
-            src_offset = 0;
         }
     }
 
@@ -114,7 +105,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
     let status = cur_task.task_status;
     let syscall_times = cur_task.syscall_times;
-    let time = get_time_us() - cur_task.task_start_time;
+    let time = cur_task.task_start_time;
 
     drop(inner);
 
@@ -125,9 +116,11 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     let mut buffer = buffer_iter.next().unwrap();
     let mut buffer_offset = 0;
     let mut src_offset = 0;
-    let mut src = unsafe {
-        slice::from_raw_parts(&status as *const _ as *const u8,
-        core::mem::size_of::<TaskStatus>())
+
+    let task_info = TaskInfo { status, syscall_times, time };
+    let src = unsafe {
+        slice::from_raw_parts(&task_info as *const _ as *const u8,
+        core::mem::size_of::<TaskInfo>())
     };
 
     while src_offset < src.len() {
@@ -136,29 +129,13 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         src_offset += len;
         buffer_offset += len;
 
-        if buffer_offset == buffer.len() && src_offset == src.len() {
-            break;
-        }
-
         // end of buffer, switch to the next page
         if buffer_offset == buffer.len() {
             buffer_offset = 0;
-            buffer = buffer_iter.next().unwrap();
-        }
-
-        if src_offset == src.len() {
-            if src.len() == core::mem::size_of::<TaskStatus>() {
-                src = unsafe {
-                    slice::from_raw_parts(&syscall_times as *const _ as *const u8,
-                    core::mem::size_of::<[u32; MAX_SYSCALL_NUM]>())
-                };
-            } else if src.len() == core::mem::size_of::<[u32; MAX_SYSCALL_NUM]>() {
-                src = unsafe {
-                    slice::from_raw_parts(&time as *const _ as *const u8,
-                    core::mem::size_of::<usize>())
-                };
-            }
-            src_offset = 0;
+            buffer = match buffer_iter.next() {
+                Some(buf) => buf,
+                None => return 0,
+            };
         }
     }
 
