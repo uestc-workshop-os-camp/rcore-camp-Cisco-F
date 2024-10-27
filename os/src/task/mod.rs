@@ -156,6 +156,13 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// sys_mmap
+    pub fn current_task_mmap(&self, _start: usize, _len: usize, _port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].mmap(_start, _len, _port)
+    }
 }
 
 /// Run the first task in task list.
@@ -204,4 +211,10 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// sys_mmap
+pub fn current_task_mmap(start: usize, len: usize, port: usize ) -> isize{
+    // println!("DEBUG in task::TASK_MANAGER.current_task_mmap");
+    TASK_MANAGER.current_task_mmap(start,len,port)
 }

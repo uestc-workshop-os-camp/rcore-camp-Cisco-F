@@ -107,6 +107,32 @@ impl TaskControlBlock {
             None
         }
     }
+
+    /// sys_mmap
+    pub fn mmap(&mut self, _start: usize, _len: usize, _port: usize) -> isize {
+        if (_port & ((1 << 3) -1))  == 0 || (_port & !((1 << 3) -1))  != 0 || _len == 0{
+            return -1;
+        }
+        let map_perm = get_mmap_permission(_port);
+
+        self.memory_set.mmap(VirtAddr(_start), VirtAddr(_start + _len), map_perm)
+    }
+
+    
+}
+
+fn get_mmap_permission(port: usize) -> MapPermission {
+    let mut perm = MapPermission::U;
+    if port & (1 << 0) != 0 {
+        perm |= MapPermission::R;
+    } 
+    if port & (1 << 1) != 0 {
+        perm |= MapPermission::W;
+    }
+    if port & (1 << 2) != 0 {
+        perm |= MapPermission::X;
+    }
+    perm
 }
 
 #[derive(Copy, Clone, PartialEq)]

@@ -1,11 +1,16 @@
 //! Process management syscalls
+// use alloc::vec::Vec;
+// use crate::mm::StepByOne;
+#[allow(unused)]
+use crate::{config::PAGE_SIZE, mm::{frame_alloc,MapPermission, VirtAddr}};
 #[allow(unused)]
 use crate::{
     config::{CLOCK_FREQ, MAX_SYSCALL_NUM}, mm::translated_byte_buffer, task::{
         change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus, TASK_MANAGER
     }, timer::{get_time, get_time_ms}
 };
-use core::slice;
+use core::{fmt::Debug, slice};
+use crate::task::current_task_mmap;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -27,14 +32,14 @@ pub struct TaskInfo {
 
 /// task exits and submit an exit code
 pub fn sys_exit(_exit_code: i32) -> ! {
-    trace!("kernel: sys_exit");
+    // trace!("kernel: sys_exit");
     exit_current_and_run_next();
     panic!("Unreachable in sys_exit!");
 }
 
 /// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
-    trace!("kernel: sys_yield");
+    // trace!("kernel: sys_yield");
     suspend_current_and_run_next();
     0
 }
@@ -43,7 +48,7 @@ pub fn sys_yield() -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!("kernel: sys_get_time");
+    // trace!("kernel: sys_get_time");
     if _ts.is_null() {
         return -1;
     }
@@ -92,8 +97,6 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
-    
     if _ti.is_null() {
         return -1;
     }
@@ -144,8 +147,8 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+    info!("kernel: sys_mmap start: {:#x}, len: {:#x}, port: {:#b}", _start, _len, _port);
+    current_task_mmap(_start, _len, _port)
 }
 
 // YOUR JOB: Implement munmap.

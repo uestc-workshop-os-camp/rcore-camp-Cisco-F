@@ -35,8 +35,10 @@ lazy_static! {
 }
 /// address space
 pub struct MemorySet {
-    page_table: PageTable,
-    areas: Vec<MapArea>,
+    /// pagetable
+    pub page_table: PageTable,
+    /// mapareas
+    pub areas: Vec<MapArea>,
 }
 
 impl MemorySet {
@@ -262,10 +264,37 @@ impl MemorySet {
             false
         }
     }
+
+    /// sys_mmap
+    #[allow(unused)]
+    pub fn mmap(&mut self, start_va: VirtAddr, end_va: VirtAddr, map_perm: MapPermission) -> isize {
+        let page_start = start_va.floor();
+        let page_end = end_va.ceil();
+
+        if VirtAddr::from(page_start) != start_va {
+            return -1;
+        }
+
+        for vpn in VPNRange::new(page_start, page_end) {
+            match self.page_table.translate(vpn) {
+                Some(pte) => {
+                    if pte.is_valid() {
+                        return -1;
+                    }
+                },
+                None => {},
+            }
+        }
+
+        let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
+        self.push(map_area, None);
+
+        0
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
+    pub vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     map_type: MapType,
     map_perm: MapPermission,
