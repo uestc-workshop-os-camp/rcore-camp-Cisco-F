@@ -38,8 +38,10 @@ pub fn kernel_token() -> usize {
 
 /// address space
 pub struct MemorySet {
-    page_table: PageTable,
-    areas: Vec<MapArea>,
+    /// pagetable
+    pub page_table: PageTable,
+    /// mapareas
+    pub areas: Vec<MapArea>,
 }
 
 impl MemorySet {
@@ -318,10 +320,74 @@ impl MemorySet {
             false
         }
     }
+
+    /// mmap for current task's memory set
+    #[allow(unused)]
+    pub fn mmap(&mut self, _start: usize, _len: usize, _port: usize) -> isize {
+        let start_va = VirtAddr(_start);
+        let end_va = VirtAddr(_start + _len);
+        let start_page = start_va.floor();
+        let end_page = end_va.ceil();
+
+        if VirtAddr::from(start_page) != start_va {
+            return -1;
+        }
+        if _port & !0x7 != 0 {
+            return -1;
+        }
+        if (_port & 0x7) == 0 {
+            return -1;
+        }
+
+        let map_perm = MapPermission::from_bits_truncate((_port as u8) << 1) | MapPermission::U;
+        let page_table = &self.page_table;
+
+        for vpn in VPNRange::new(start_page, end_page) {
+            match page_table.translate(vpn) {
+                Some(pte) => {
+                    if pte.is_valid() {
+                        return -1;
+                    }
+                },
+                None => {},
+            };
+        }
+        self.insert_framed_area(start_va, end_va, map_perm);
+
+        0
+    }
+
+    /// unmap for current task's memory set
+    #[allow(unused)]
+    pub fn munmap(&mut self, _start: usize, _len: usize) -> isize {
+        let start_va = VirtAddr(_start);
+        let end_va = VirtAddr(_start + _len);
+        let start_page = start_va.floor();
+        let end_page = end_va.ceil();
+        let page_table = &mut self.page_table;
+
+        if VirtAddr::from(start_page) != start_va {
+            return -1;
+        }
+
+        for vpn in VPNRange::new(start_page, end_page) {
+            match page_table.translate(vpn) {
+                Some(pte) => {
+                    if !pte.is_valid() {
+                        return -1;
+                    }
+                },
+                None => { return -1; },
+            };
+            page_table.unmap(vpn);
+        }
+
+        0
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
-    vpn_range: VPNRange,
+    pub vpn_range: VPNRange,
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     map_type: MapType,
     map_perm: MapPermission,
