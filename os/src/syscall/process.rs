@@ -108,7 +108,8 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
     let status = cur_task.task_status;
     let syscall_times = cur_task.syscall_times;
-    let time = cur_task.task_start_time;
+    let time = get_time_ms() - cur_task.task_start_time;
+    info!("!!!!!!!!task {} has ran for {} ms", cur_task_num, time);
 
     drop(inner);
 
