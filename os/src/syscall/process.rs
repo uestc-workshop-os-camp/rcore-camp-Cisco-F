@@ -10,7 +10,8 @@ use crate::{
     }, timer::{get_time, get_time_ms}
 };
 use core::{fmt::Debug, slice};
-use crate::task::current_task_mmap;
+use crate::mm::VPNRange;
+// use crate::task::current_task_mmap;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -148,8 +149,45 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    info!("kernel: sys_mmap start: {:#x}, len: {:#x}, port: {:#b}", _start, _len, _port);
-    current_task_mmap(_start, _len, _port)
+    let start_va = VirtAddr(_start);
+    let end_va = VirtAddr(_start + _len);
+    let start_page = start_va.floor();
+    let end_page = end_va.ceil();
+
+    if VirtAddr::from(start_page) != start_va {
+        return -1;
+    }
+    if _port & !0x7 != 0 {
+        return -1;
+    }
+    if (_port & 0x7) == 0 {
+        return -1;
+    }
+
+    let map_perm = MapPermission::from_bits_truncate((_port as u8) << 1) | MapPermission::U;
+
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur_num = inner.current_task;
+    let cur_task = &mut inner.tasks[cur_num];
+    let memory_set = &mut cur_task.memory_set;
+    let page_table = &mut memory_set.page_table;
+
+    for vpn in VPNRange::new(start_page, end_page) {
+       match page_table.translate(vpn) {
+         Some(pte) => {
+              if pte.is_valid() {
+                  return -1;
+              }
+         },
+         None => {},
+       };
+    }
+
+    // let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
+    memory_set.insert_framed_area(start_va, end_va, map_perm);
+    drop(inner);
+
+    0
 }
 
 // YOUR JOB: Implement munmap.
