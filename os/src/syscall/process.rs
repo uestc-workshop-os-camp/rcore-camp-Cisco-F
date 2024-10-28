@@ -2,31 +2,22 @@
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
+    config::CLOCK_FREQ,
     loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str},
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
-    },
+        add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, TaskInfo,
+    }, timer::get_time,
 };
+use core::fmt::Debug;
+#[allow(unused)]
+use crate::mm::{VPNRange, MapPermission, VirtAddr};
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
     pub sec: usize,
     pub usec: usize,
-}
-
-/// Task information
-#[allow(dead_code)]
-pub struct TaskInfo {
-    /// Task status in it's life cycle
-    status: TaskStatus,
-    /// The numbers of syscall called by task
-    syscall_times: [u32; MAX_SYSCALL_NUM],
-    /// Total running time of task
-    time: usize,
 }
 
 /// task exits and submit an exit code
@@ -118,40 +109,49 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    // trace!("kernel: sys_get_time");
+    if _ts.is_null() {
+        return -1;
+    }
+
+    // get current tick
+    let time_ticks = get_time();
+    let sec = time_ticks / CLOCK_FREQ;
+    let usec = (time_ticks % CLOCK_FREQ) * 1_000_000 / CLOCK_FREQ;
+    let time = TimeVal { sec, usec };
+
+    let token = current_user_token();
+    let ti_ref = translated_refmut(token, _ts);
+    *ti_ref = time;
+
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    if _ti.is_null() {
+        return -1;
+    }
+
+    let task_info = current_task().unwrap().inner_exclusive_access().get_task_info();
+    let token = current_user_token();
+
+    let ti_ref = translated_refmut(token, _ti);
+    *ti_ref = task_info;
+
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    current_task().unwrap().inner_exclusive_access().cur_task_mmap(_start, _len, _port)
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    current_task().unwrap().inner_exclusive_access().cur_task_munmap(_start, _len)
 }
 
 /// change data segment size

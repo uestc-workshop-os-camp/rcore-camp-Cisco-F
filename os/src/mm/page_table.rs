@@ -167,15 +167,19 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
     let end = start + len;
     let mut v = Vec::new();
     while start < end {
+        // virtual address of the data head
         let start_va = VirtAddr::from(start);
+        // convert the virtaddr to virtual page number
         let mut vpn = start_va.floor();
+        // find relative physics page number
         let ppn = page_table.translate(vpn).unwrap().ppn();
+        // locate the next page to handle the situation that data is splited by 2 or more pages
         vpn.step();
-        let mut end_va: VirtAddr = vpn.into();
+        let mut end_va: VirtAddr = vpn.into(); // the beginning of the next page
         end_va = end_va.min(VirtAddr::from(end));
-        if end_va.page_offset() == 0 {
-            v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]);
-        } else {
+        if end_va.page_offset() == 0 { // data stops at just the beginning of the next page, or the data is in mutiple pages
+            v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]); // get the content of the rest of the page
+        } else { // actully means the data ends
             v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()]);
         }
         start = end_va.into();
