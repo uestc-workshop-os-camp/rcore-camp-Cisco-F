@@ -23,7 +23,27 @@ impl TaskManager {
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        if self.ready_queue.is_empty() {
+            return None;
+        }
+
+        let mut min_stride_task = self.ready_queue[0].clone();
+        let mut min_stride_idx = 0;
+
+        // find task with smallest pass
+        for (i, task) in self.ready_queue.iter().enumerate() {
+            let min_stride = min_stride_task.inner_exclusive_access().stride;
+            let cur_stride = task.inner_exclusive_access().stride;
+            if min_stride > cur_stride {
+                min_stride_task = task.clone();
+                min_stride_idx = i;
+            }
+        }
+
+        self.ready_queue.remove(min_stride_idx);
+        min_stride_task.inner_exclusive_access().update_stride();
+        // println!("fetched task id: {}", min_stride_task.getpid());
+        Some(min_stride_task)
     }
 }
 

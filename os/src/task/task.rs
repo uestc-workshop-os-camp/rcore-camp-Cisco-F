@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::config::{BIG_STRIDE, MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_ms;
@@ -46,6 +46,10 @@ impl TaskControlBlock {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
     }
+    /// get pid of process
+    pub fn getpid(&self) -> usize {
+        self.pid.0
+    }
 }
 
 pub struct TaskControlBlockInner {
@@ -86,6 +90,15 @@ pub struct TaskControlBlockInner {
 
     /// Syscall record
     pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    /// Priority of the current task
+    pub priority: isize,
+
+    /// Stride of the current task
+    pub stride: usize,
+
+    /// Pass of the current task
+    pub pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -120,6 +133,18 @@ impl TaskControlBlockInner {
     }
     pub fn cur_task_munmap(&mut self, _start: usize, _len: usize) -> isize {
         self.memory_set.munmap(_start, _len)
+    }
+    pub fn set_priority(&mut self, _prio: isize) -> isize {
+        if _prio <= 1 {
+            trace!("kernel: setting task priority fault! prio: {}", _prio);
+            return -1;
+        }
+        self.priority = _prio;
+        self.pass = BIG_STRIDE / _prio as usize;
+        _prio
+    }
+    pub fn update_stride(&mut self) {
+        self.stride += self.pass;
     }
 }
 
@@ -156,6 +181,9 @@ impl TaskControlBlock {
                     program_brk: user_sp,
                     task_start_time: 0,
                     syscall_times: [0; MAX_SYSCALL_NUM],
+                    priority: 16,
+                    stride: 0,
+                    pass: BIG_STRIDE / 16,
                 })
             },
         };
@@ -235,6 +263,9 @@ impl TaskControlBlock {
                     program_brk: parent_inner.program_brk,
                     task_start_time: 0,
                     syscall_times: [0; MAX_SYSCALL_NUM],
+                    priority: 16,
+                    stride: 0,
+                    pass: BIG_STRIDE / 16,
                 })
             },
         });
@@ -248,11 +279,6 @@ impl TaskControlBlock {
         task_control_block
         // **** release child PCB
         // ---- release parent PCB
-    }
-
-    /// get pid of process
-    pub fn getpid(&self) -> usize {
-        self.pid.0
     }
 
     /// change the location of the program break. return None if failed.
