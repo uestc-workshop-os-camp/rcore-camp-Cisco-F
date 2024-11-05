@@ -168,7 +168,22 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
-    // trace!("kernel: pid[{}] sys_spawn", current_task().unwrap().pid.0);
+    trace!("kernel: pid[{}] sys_spawn", current_task().unwrap().pid.0);
+    let token = current_user_token();
+    let path = translated_str(token, _path);
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        let data = app_inode.read_all();
+        let new_task = current_task().unwrap().spawn(data.as_slice());
+        let new_pid = new_task.getpid();
+        let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+        trap_cx.x[10] = 0;
+        add_task(new_task);
+
+        new_pid as isize
+    } else {
+        error!("kernel: sys_spawn failed!");
+        -1
+    }
     // let parent = current_task().unwrap();
     // let token = current_user_token();
     // let path = translated_str(token, _path);
@@ -187,7 +202,6 @@ pub fn sys_spawn(_path: *const u8) -> isize {
     //     trace!("kernel: sys_spawn invalid file name!");
     //     -1
     // }
-    0
 }
 
 // YOUR JOB: Set task priority.
