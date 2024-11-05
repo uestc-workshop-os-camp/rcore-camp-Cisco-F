@@ -1,6 +1,7 @@
 //! Process management syscalls
 //!
 use alloc::sync::Arc;
+use riscv::addr::VirtAddr;
 
 use crate::{
     config::CLOCK_FREQ,
