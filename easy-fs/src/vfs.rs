@@ -183,4 +183,34 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+    /// get inode id
+    pub fn get_inode_id(&self) -> u64 {
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u64, self.block_offset as u64)
+    }
+    /// get inode status
+    pub fn get_inode_stat(&self) -> u32 {
+        self.read_disk_inode(|disk_inode| {
+            disk_inode.get_type()
+        })
+    }
+    /// get inode's link count
+    pub fn get_link_count(&self, ionde_id: u64) -> u32 {
+        let _fs = self.fs.lock();
+        self.read_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            let mut cnt = 0;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                assert_eq!(
+                    disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device,),
+                    DIRENT_SZ,
+                );
+                if dirent.inode_id() == ionde_id as u32 {
+                    cnt += 1;
+                }
+            }
+            cnt
+        })
+    }
 }

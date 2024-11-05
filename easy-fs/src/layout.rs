@@ -387,6 +387,13 @@ impl DiskInode {
         }
         write_size
     }
+    /// get disk inode type
+    pub fn get_type(&self) -> u32 {
+        match self.type_ {
+            DiskInodeType::Directory => 0o040000,
+            DiskInodeType::File => 0o100000
+        }
+    }
 }
 /// A directory entry
 #[repr(C)]
