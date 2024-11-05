@@ -1,11 +1,12 @@
 //! Process management syscalls
 //!
 use alloc::sync::Arc;
+use riscv::addr::VirtAddr;
 
 use crate::{
     config::CLOCK_FREQ,
     fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, PhysAddr},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, TaskInfo
     }, timer::get_time,
@@ -194,4 +195,16 @@ pub fn sys_spawn(_path: *const u8) -> isize {
 pub fn sys_set_priority(_prio: isize) -> isize {
     trace!("kernel: setting task priority: {}", _prio);
     current_task().unwrap().inner_exclusive_access().set_priority(_prio)
+}
+
+pub fn va_to_pa(va: VirtAddr) -> Option<PhysAddr> {
+    let offset = va.page_offset();
+    let ppn = ppn_by_vpn(va.floor());
+    match ppn {
+        Some(ppn) => Some(PhysAddr(ppn.0 << 12) | offset),
+        _ => {
+            error!("kernel: va_to_pa cannot convert va to pa!");
+            None
+        }
+    }
 }

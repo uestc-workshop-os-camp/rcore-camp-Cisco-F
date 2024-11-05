@@ -183,4 +183,9 @@ impl Inode {
         });
         block_cache_sync_all();
     }
+    /// get inode id
+    pub fn get_inode_id(&self) -> u64 {
+        let fs = self.fs.lock();
+        fs.get_inode_id(self.block_id as u64, self.block_offset as u64)
+    }
 }
