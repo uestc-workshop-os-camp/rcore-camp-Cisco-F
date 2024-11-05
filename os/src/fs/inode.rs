@@ -172,3 +172,46 @@ impl File for OSInode {
         (ino, mode, nlink)
     }
 }
+
+/// create a hard link
+pub fn linkat(old_name: *const u8, new_name: *const u8) -> isize {
+    let mut length = 0;
+    unsafe {
+        let mut ptr = old_name;
+        while(*ptr) as char != '\0' {
+            length += 1;
+            ptr = ptr.offset(1);
+        }
+        let old_name = core::str::from_utf8_unchecked(
+            core::slice::from_raw_parts(old_name, length)
+        );
+
+        length = 0;
+        let mut ptr = new_name;
+        while(*ptr) as char != '\0' {
+            length += 1;
+            ptr = ptr.offset(1);
+        }
+        let new_name = core::str::from_utf8_unchecked(
+            core::slice::from_raw_parts(new_name, length)
+        );
+
+        ROOT_INODE.linkat(old_name, new_name)
+    }
+}
+
+/// delete a hard link
+pub fn unlinkat(name: *const u8) -> isize {
+    let mut length = 0;
+    unsafe {
+        let mut ptr = name;
+        while *ptr != 0 {
+            length += 1;
+            ptr = ptr.offset(1);
+        }
+        let name = core::str::from_utf8_unchecked(
+            core::slice::from_raw_parts(name, length)
+        );
+        ROOT_INODE.unlinkat(name)
+    }
+}

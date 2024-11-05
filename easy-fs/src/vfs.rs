@@ -213,4 +213,59 @@ impl Inode {
             cnt
         })
     }
+
+    /// create a hard link
+    pub fn linkat(&self, old_name: &str, new_name: &str) -> isize {
+        let mut fs = self.fs.lock();
+        let old_inode_id = self.read_disk_inode(|disk_inode| {
+            self.find_inode_id(old_name, disk_inode)
+        });
+        if old_inode_id.is_none() {
+            return -1;
+        }
+        let old_inode_id = old_inode_id.unwrap();
+        if self.read_disk_inode(|disk_inode| { self.find_inode_id(new_name, disk_inode) }).is_some() {
+                return -1;
+        }
+
+        let (new_block_id, new_block_offset) = fs.get_disk_inode_pos(old_inode_id);
+        get_block_cache(new_block_id as usize, Arc::clone(&self.block_device))
+            .lock()
+            .modify(new_block_offset, |new_inode: &mut DiskInode| {
+                new_inode.initialize(DiskInodeType::File);
+            });
+
+        self.modify_disk_inode(|root_inode| {
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            let dirent = DirEntry::new(new_name, old_inode_id);
+            root_inode.write_at(file_count * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+        });
+        0
+    }
+
+    /// delete a hard link
+    pub fn unlinkat(&self, name: &str) -> isize {
+        self.modify_disk_inode(|root_inode| {
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                if root_inode.read_at(
+                    i * DIRENT_SZ, 
+                    dirent.as_bytes_mut(), 
+                    &self.block_device
+                ) != DIRENT_SZ
+                {
+                    continue;
+                }
+                if dirent.name() == name {
+                    let dirent = DirEntry::empty();
+                    root_inode.write_at(i * DIRENT_SZ, dirent.as_bytes(), &self.block_device);
+                    return 0;
+                }
+            }
+            -1
+        })
+    }
 }
