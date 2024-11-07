@@ -49,6 +49,8 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// whether to enable dead lock detect
+    pub dead_lock_detect: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -81,6 +83,75 @@ impl ProcessControlBlockInner {
     /// get a task with tid in this process
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
+    }
+    /// deadlock detecting
+    pub fn deadlock_detect(&self) -> bool {
+        let len = self.mutex_list.len() + self.semaphore_list.len();
+        let mut allocated: Vec<Vec<u32>> = vec![vec![0; len]; self.tasks.len()];
+        let mut need: Vec<Vec<u32>> = vec![vec![0; len]; self.tasks.len()];
+
+        let fetch_id = |flag, id| -> usize {
+            match flag {
+                true => id + self.mutex_list.len(),
+                false => id,
+            }
+        };
+        for (tid, tcb) in self.tasks.iter().enumerate() {
+            if let Some(task) = tcb {
+                let inner = task.inner_exclusive_access();
+                for alloc in &inner.allocated {
+                    allocated[tid][fetch_id(alloc.0, alloc.1)] += 1;
+                }
+                if let Some(n) = &inner.need {
+                    need[tid][fetch_id(n.0, n.1)] += 1;
+                }
+            }
+        }
+
+        // set work & finish matrix
+        // initialize work matrix
+        let mut work: Vec<u32> = vec![0; len];
+        for (i, option) in self.mutex_list.iter().enumerate() {
+            if let Some(mutex) = option {
+                if !mutex.is_locked() {
+                    work[i] += 1;
+                }
+            }
+        }
+        for (i, option) in self.semaphore_list.iter().enumerate() {
+            if let Some(sema) = option {
+                let cnt = sema.inner.exclusive_access().count;
+                if cnt > 0 {
+                    work[i + self.mutex_list.len()] += cnt as u32;
+                }
+            }
+        }
+
+        // initialize finish matrix
+        let mut finish = vec![false; self.tasks.len()];
+        loop {
+            let task = finish.iter().enumerate().find(|(tid, finished)| {
+                if **finished {
+                    false
+                } else {
+                    for j in 0..len {
+                        if need[*tid][j] > work[j] {
+                            return false;
+                        }
+                    }
+                    true
+                }
+            });
+            if let Some((tid, _)) = task {
+                for j in 0..len {
+                    work[j] += allocated[tid][j];
+                }
+                finish[tid] = true
+            } else {
+                break;
+            }
+        }
+        finish.contains(&false)
     }
 }
 
@@ -119,6 +190,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    dead_lock_detect: false,
                 })
             },
         });
@@ -245,6 +317,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    dead_lock_detect: false,
                 })
             },
         });

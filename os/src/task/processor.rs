@@ -7,6 +7,7 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{ProcessControlBlock, TaskContext, TaskControlBlock};
+use crate::mm::{PhysPageNum, VirtPageNum};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
@@ -41,6 +42,20 @@ impl Processor {
     ///Get current task in cloning semanteme
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
+    }
+
+    /// get current task's ppn by vpn
+    pub fn get_ppn_by_vpn(&self, vpn: VirtPageNum) -> Option<PhysPageNum> {
+        let current = self.current().unwrap();
+        let ppn = current
+            .process
+            .upgrade()
+            .unwrap()
+            .inner_exclusive_access()
+            .memory_set
+            .translate(vpn.into())
+            .map(|entry| entry.ppn());
+        ppn
     }
 }
 
@@ -127,4 +142,9 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+
+/// get ppn by vpn
+pub fn ppn_by_vpn(vpn: VirtPageNum) -> Option<PhysPageNum> {
+    PROCESSOR.exclusive_access().get_ppn_by_vpn(vpn)
 }

@@ -55,6 +55,26 @@ pub fn sys_mutex_create(blocking: bool) -> isize {
         process_inner.mutex_list.len() as isize - 1
     }
 }
+
+/// generate need matrix
+fn set_need_matrix(flag: bool, id: usize) {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    assert!(inner.need.replace((flag, id)).is_none());
+}
+
+fn set_release_matrix(flag: bool, id: usize) {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if let Some(pos) = inner
+        .allocated
+        .iter()
+        .position(|res| res.0 == flag && res.1 == id) 
+    {
+        inner.allocated.swap_remove(pos);
+    }
+}
+
 /// mutex lock syscall
 pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     trace!(
@@ -70,6 +90,13 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+
+    set_need_matrix(false, mutex_id);
+    if process_inner.dead_lock_detect && process_inner.deadlock_detect() {
+        set_release_matrix(false, mutex_id);
+        return -0xDEAD;
+    }
+
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
@@ -94,6 +121,7 @@ pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
+    set_release_matrix(false, mutex_id);
     mutex.unlock();
     0
 }
@@ -164,6 +192,13 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     );
     let process = current_process();
     let process_inner = process.inner_exclusive_access();
+
+    set_need_matrix(true, sem_id);
+    if process_inner.dead_lock_detect && process_inner.deadlock_detect() {
+        set_release_matrix(true, sem_id);
+        return -0xDEAD;
+    }
+
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
     sem.down();
@@ -239,6 +274,8 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
     let condvar = Arc::clone(process_inner.condvar_list[condvar_id].as_ref().unwrap());
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
+    set_release_matrix(false, mutex_id);
+    set_need_matrix(false, mutex_id);
     condvar.wait(mutex);
     0
 }
@@ -246,6 +283,15 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
 pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+    trace!("kernel: sys_enable_deadlock_detect");
+    
+    let cur_process = current_process();
+    let mut inner = cur_process.inner_exclusive_access();
+    if _enabled == 1 || _enabled == 0 {
+        inner.dead_lock_detect = _enabled != 0;
+        0
+    } else {
+        error!("kernel: sys_enable_deadlock_detect failed!");
+        -1
+    }
 }

@@ -12,6 +12,8 @@ pub trait Mutex: Sync + Send {
     fn lock(&self);
     /// Unlock the mutex
     fn unlock(&self);
+    /// whether mutex is locked
+    fn is_locked(&self) -> bool;
 }
 
 /// Spinlock Mutex struct
@@ -40,6 +42,9 @@ impl Mutex for MutexSpin {
                 continue;
             } else {
                 *locked = true;
+                if let Some(task) = current_task() {
+                    task.inner_exclusive_access().require_resource();
+                }
                 return;
             }
         }
@@ -49,6 +54,10 @@ impl Mutex for MutexSpin {
         trace!("kernel: MutexSpin::unlock");
         let mut locked = self.locked.exclusive_access();
         *locked = false;
+    }
+
+    fn is_locked(&self) -> bool {
+        self.locked.exclusive_access().clone()
     }
 }
 
@@ -88,6 +97,9 @@ impl Mutex for MutexBlocking {
             block_current_and_run_next();
         } else {
             mutex_inner.locked = true;
+            if let Some(task) = current_task() {
+                task.inner_exclusive_access().require_resource();
+            }
         }
     }
 
@@ -97,9 +109,14 @@ impl Mutex for MutexBlocking {
         let mut mutex_inner = self.inner.exclusive_access();
         assert!(mutex_inner.locked);
         if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
+            waking_task.inner_exclusive_access().require_resource();
             wakeup_task(waking_task);
         } else {
             mutex_inner.locked = false;
         }
+    }
+
+    fn is_locked(&self) -> bool {
+        self.inner.exclusive_access().locked
     }
 }
